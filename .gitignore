@@ -1,0 +1,48 @@
+# Ignore build and intermediate files
+Plugins/GameDirector/Source/ThirdParty/llama/win64/bin/
+Binaries/
+DerivedDataCache/
+Intermediate/
+Saved/
+.vscode/
+.vs/
+*.VC.db
+*.sln
+*.suo
+*.opensdf
+*.sdf
+
+# Ignore user-specific config
+*.user
+*.userprefs
+
+# Ignore autosaves and backups
+*_Backup*.umap
+*_BuiltData.uasset
+
+# Include source and config
+!Source/
+!Config/
+
+# Ignore asset caches
+*.pdb
+*.idb
+
+# Git LFS (big binaries)
+*.uasset
+*.umap
+*.wav
+*.png
+*.jpg
+*.jpeg
+*.mp4
+*.mov
+*.ogg
+*.fbx
+*.psd
+*.mp3
+*.tga
+*.json
+
+*.dll
+*.exe
