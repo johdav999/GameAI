@@ -20,9 +20,8 @@ public:
     /** Loads a GGUF model located on disk. */
     bool LoadModel(const FString& ModelPath);
 
-    /** Executes a synchronous inference call using the provided prompt. */
+    /** Executes a synchronous inference call using the provided scenario prompt and returns the raw JSON string. */
     FString RunInference(const FString& Prompt);
-    mutable FCriticalSection DecodeMutex;
 private:
     void Release();
 
@@ -31,4 +30,5 @@ private:
     llama_model* Model;
     llama_context* Context;
     bool bIsLoaded;
+    mutable FCriticalSection DecodeMutex;
 };

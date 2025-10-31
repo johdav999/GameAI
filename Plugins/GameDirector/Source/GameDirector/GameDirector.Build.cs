@@ -28,6 +28,8 @@ public class GameDirector : ModuleRules
                 "CoreUObject",
                 "Engine",
                 "Projects",
+                "AIModule",
+                "GameplayTasks",
             }
         );
         string LlamaLibPath = Path.Combine(ThirdPartyPath, "win64", "lib");
@@ -37,6 +39,8 @@ public class GameDirector : ModuleRules
         PrivateDependencyModuleNames.AddRange(
             new string[]
             {
+                "Json",
+                "JsonUtilities",
             }
         );
 
