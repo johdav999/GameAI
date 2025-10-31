@@ -3,6 +3,8 @@
 #include "Misc/Paths.h"
 
 #include <llama.h>
+#include <algorithm>
+#include <cstring>
 #include <string>
 #include <vector>
 

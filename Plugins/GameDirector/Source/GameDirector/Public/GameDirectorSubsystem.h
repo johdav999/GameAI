@@ -1,14 +1,21 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "GameDirectorTypes.h"
 #include "Subsystems/GameInstanceSubsystem.h"
+#include "TimerManager.h"
 
 #include "GameDirectorSubsystem.generated.h"
 
 class FLlamaRunner;
+class FJsonObject;
+
+DECLARE_LOG_CATEGORY_EXTERN(LogGameDirector, Log, All);
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnDifficultyChanged, const FAIDifficulty&, Difficulty);
 
 /**
- * GameInstance subsystem responsible for hosting the llama.cpp runtime.
+ * GameInstance subsystem that bridges gameplay telemetry with the local llama.cpp runner.
  */
 UCLASS()
 class GAMEDIRECTOR_API UGameDirectorSubsystem : public UGameInstanceSubsystem
@@ -20,17 +27,31 @@ public:
     virtual void Deinitialize() override;
 
     /**
-     * Routes a JSON encoded request to the llama model and returns the generated output text.
+     * Triggers a difficulty update for the supplied scenario description.
      */
     UFUNCTION(BlueprintCallable, Category = "GameDirector|AI")
-    FString QueryModel(const FString& InputJSON);
+    void RequestDifficultyUpdate(const FString& Scenario);
 
+    /** Broadcast whenever the model selects a new difficulty configuration. */
+    UPROPERTY(BlueprintAssignable, Category = "GameDirector|AI")
+    FOnDifficultyChanged OnDifficultyChanged;
 
+    /** Returns the baseline configuration used when timers expire. */
+    const FAIDifficulty& GetBaselineDifficulty() const { return BaselineDifficulty; }
+
+    /** Returns the latest configuration pushed to listeners. */
+    const FAIDifficulty& GetCurrentDifficulty() const { return CurrentDifficulty; }
 
 private:
-    /** Attempts to find a GGUF model under Content/AIModels. */
+    void HandleModelResponse(const FString& Response); 
+    bool TryParseDifficulty(const TSharedPtr<FJsonObject>& RootObject, FAIDifficulty& OutDifficulty, FString& OutReason) const;
+    void RestoreBaseline();
     FString ResolveModelPath() const;
 
 private:
     TSharedPtr<FLlamaRunner> LlamaRunner;
+    FAIDifficulty BaselineDifficulty;
+    FAIDifficulty CurrentDifficulty;
+    FTimerHandle RestoreTimerHandle;
 };
+
