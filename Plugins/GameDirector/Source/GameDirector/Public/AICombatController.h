@@ -45,14 +45,25 @@ protected:
     void UnregisterFromSubsystem();
 
 protected:
+    //{"schema": "gda.fps.output.v1", "intent": "tune_difficulty", "reason": "Easing pressure due to fast player deaths.", "tool_calls": [{"name": "AdjustAIDifficulty", "args": {"aim_spread_level": 2, "aim_spread_fine": 0.05, "reaction_level": 1, "aggression_level": 1, "peek_level": 1, "duration_s": 60}}]}
     UPROPERTY(EditDefaultsOnly, Category = "GameDirector|AI|Blackboard")
-    FName AggressionKeyName;
+    FName peek_level;
 
     UPROPERTY(EditDefaultsOnly, Category = "GameDirector|AI|Blackboard")
-    FName ReactionKeyName;
+    FName reaction_level;
 
     UPROPERTY(EditDefaultsOnly, Category = "GameDirector|AI|Blackboard")
-    FName PeekKeyName;
+    FName aim_spread_fine;
+
+    UPROPERTY(EditDefaultsOnly, Category = "GameDirector|AI|Blackboard")
+    FName aim_spread_level;
+
+    UPROPERTY(EditDefaultsOnly, Category = "GameDirector|AI|Blackboard")
+    FName duration_s;
+
+    UPROPERTY(EditDefaultsOnly, Category = "GameDirector|AI|Blackboard")
+    FName aggression_level;
+
 
     /** Default values that will be restored whenever timers expire. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GameDirector|AI")

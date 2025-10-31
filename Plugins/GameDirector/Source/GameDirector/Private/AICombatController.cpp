@@ -5,15 +5,20 @@
 
 AAICombatController::AAICombatController()
 {
-    AggressionKeyName = TEXT("AggressionLevel");
-    ReactionKeyName = TEXT("ReactionLevel");
-    PeekKeyName = TEXT("PeekLevel");
 
-    DefaultDifficulty.AimSpreadLevel = 1;
+    //{"schema": "gda.fps.output.v1", "intent": "tune_difficulty", "reason": "Easing pressure due to fast player deaths.", "tool_calls": [{"name": "AdjustAIDifficulty", "args": {"aim_spread_level": 2, "aim_spread_fine": 0.05, "reaction_level": 1, "aggression_level": 1, "peek_level": 1, "duration_s": 60}}]}
+    aggression_level= TEXT("AggressionLevel");
+    reaction_level= TEXT("ReactionLevel");
+    peek_level = TEXT("PeekLevel");
+	aim_spread_fine = TEXT("AimSpreadFine");
+	aim_spread_level = TEXT("AimSpreadLevel");
+	duration_s = TEXT("DurationS");
+
+    DefaultDifficulty.AimSpreadLevel = 2;
     DefaultDifficulty.AimSpreadFine = 0.0f;
-    DefaultDifficulty.ReactionLevel = 1;
-    DefaultDifficulty.AggressionLevel = 1;
-    DefaultDifficulty.PeekLevel = 1;
+    DefaultDifficulty.ReactionLevel =2;
+    DefaultDifficulty.AggressionLevel = 2;
+    DefaultDifficulty.PeekLevel =2;
     DefaultDifficulty.DurationS = 0;
 
     CachedDifficulty = DefaultDifficulty;
@@ -64,14 +69,21 @@ void AAICombatController::PushToBlackboard()
 {
     if (UBlackboardComponent* BlackboardComp = GetBlackboardComponent())
     {
-        BlackboardComp->SetValueAsFloat(AggressionKeyName, static_cast<float>(CachedDifficulty.AggressionLevel));
-        BlackboardComp->SetValueAsFloat(ReactionKeyName, static_cast<float>(CachedDifficulty.ReactionLevel));
-        BlackboardComp->SetValueAsFloat(PeekKeyName, static_cast<float>(CachedDifficulty.PeekLevel));
+        BlackboardComp->SetValueAsInt(aggression_level, (CachedDifficulty.AggressionLevel));
+        BlackboardComp->SetValueAsInt(reaction_level, (CachedDifficulty.ReactionLevel));
+        BlackboardComp->SetValueAsInt(peek_level, (CachedDifficulty.PeekLevel));
+		BlackboardComp->SetValueAsFloat(aim_spread_fine, (CachedDifficulty.AimSpreadFine));
+		BlackboardComp->SetValueAsInt(aim_spread_level, (CachedDifficulty.AimSpreadLevel));
+		BlackboardComp->SetValueAsInt(duration_s, (CachedDifficulty.DurationS));
+
     }
 }
 
 void AAICombatController::OnSubsystemDifficultyChanged(const FAIDifficulty& InDiff)
 {
+    UE_LOG(LogGameDirector, Log, TEXT("[%s] Received difficulty update: %s"),
+        *GetName(),
+        *InDiff.ToString());
     AdjustDifficulty(InDiff);
 }
 

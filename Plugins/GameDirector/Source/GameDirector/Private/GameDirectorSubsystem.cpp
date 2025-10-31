@@ -9,6 +9,9 @@
 #include "Misc/Paths.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
+#include "Policies/CondensedJsonPrintPolicy.h"
+
+
 #include "TimerManager.h"
 
 DEFINE_LOG_CATEGORY(LogGameDirector);
@@ -151,10 +154,19 @@ bool UGameDirectorSubsystem::TryParseDifficulty(const TSharedPtr<FJsonObject>& R
         }
 
         TSharedPtr<FJsonObject> ArgsObject;
-        if (!ToolObject->TryGetObjectField(TEXT("args"), ArgsObject) || !ArgsObject.IsValid())
+        const TSharedPtr<FJsonObject>* ArgsPtr = nullptr;
+
+        if (ToolObject->TryGetObjectField(TEXT("args"), ArgsPtr) && ArgsPtr && ArgsPtr->IsValid())
         {
+            ArgsObject = *ArgsPtr;
+        }
+        else
+        {
+            UE_LOG(LogTemp, Warning, TEXT("[GameDirector] Missing or invalid args for %s"), *ToolName);
             continue;
         }
+
+
 
         double NumberValue = 0.0;
 

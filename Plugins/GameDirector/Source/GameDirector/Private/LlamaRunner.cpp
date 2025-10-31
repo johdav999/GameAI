@@ -75,38 +75,49 @@ FString FLlamaRunner::RunInference(const FString& Prompt)
         return FString();
     }
 
-    // --- Compose full prompt to match training style ---
-    const char* SystemJSON =
+    // ---- 1) Structured system prompt (tight schema control) ----
+    static const char* kSystem =
         "SYSTEM: You are GameDirector AI for an FPS. "
-        "Only reply with a single JSON object with keys: schema, intent, reason, tool_calls. "
-        "Do not write prose. Numbers must respect bounds. "
-        "Levels are 1..5. Fine nudges are -0.10..+0.10.";
+        "Only reply with a single JSON object with exactly these keys: schema, intent, reason, tool_calls. "
+        "Do not write any prose before or after the JSON. No markdown. No labels. "
+        "schema must be \"gda.fps.output.v1\". "
+        "tool_calls must be an array with one object of the form: "
+        "{\"name\":\"AdjustAIDifficulty\",\"args\":{\"aim_spread_level\":int,\"aim_spread_fine\":float,"
+        "\"reaction_level\":int,\"aggression_level\":int,\"peek_level\":int,\"duration_s\":int}}. "
+        "Levels are 1..5, fine is -0.10..+0.10, duration_s is 1..300.";
 
-    std::string FullPrompt =
-        std::string(SystemJSON) +
-        "\nINPUT: " + TCHAR_TO_UTF8(*Prompt) +
-        "\nOUTPUT: ";
+    static const char* kFewShot =
+        "EXAMPLE OUTPUT ONLY:\n"
+        "{\"schema\":\"gda.fps.output.v1\",\"intent\":\"tune_difficulty\",\"reason\":\"Easing pressure due to fast player deaths.\","
+        "\"tool_calls\":[{\"name\":\"AdjustAIDifficulty\",\"args\":{\"aim_spread_level\":2,\"aim_spread_fine\":0.05,"
+        "\"reaction_level\":1,\"aggression_level\":1,\"peek_level\":1,\"duration_s\":60}}]}";
 
-    // --- Tokenize ---
-    int32_t tok_needed = llama_tokenize(Vocab, FullPrompt.c_str(), (int32_t)FullPrompt.size(),
-        nullptr, 0, true, true);
+    std::string fullPrompt;
+    fullPrompt.reserve(1024);
+    fullPrompt.append(kSystem).append("\n");
+    fullPrompt.append(kFewShot).append("\n");
+    fullPrompt.append("INPUT: ").append(TCHAR_TO_UTF8(*Prompt)).append("\n");
+    fullPrompt.append("OUTPUT: ");
+
+    // ---- 2) Tokenize ----
+    int32_t tok_needed = llama_tokenize(Vocab, fullPrompt.c_str(), (int32_t)fullPrompt.size(), nullptr, 0, true, true);
     if (tok_needed < 0) tok_needed = -tok_needed;
     if (tok_needed <= 0)
     {
-        UE_LOG(LogLlamaRunner, Error, TEXT("Tokenization failed for prompt."));
+        UE_LOG(LogLlamaRunner, Error, TEXT("Tokenization failed."));
         return FString();
     }
 
     std::vector<llama_token> tokens((size_t)tok_needed);
-    int32_t tok_count = llama_tokenize(Vocab, FullPrompt.c_str(), (int32_t)FullPrompt.size(),
+    int32_t tok_count = llama_tokenize(Vocab, fullPrompt.c_str(), (int32_t)fullPrompt.size(),
         tokens.data(), (int32_t)tokens.size(), true, true);
     if (tok_count <= 0)
     {
-        UE_LOG(LogLlamaRunner, Error, TEXT("Tokenization write failed for prompt."));
+        UE_LOG(LogLlamaRunner, Error, TEXT("Tokenization (write) failed."));
         return FString();
     }
 
-    // --- Decode prompt (last token only computes logits) ---
+    // ---- 3) Decode prompt ----
     llama_batch prompt_batch = llama_batch_init(tok_count, 0, 1);
     prompt_batch.n_tokens = tok_count;
     for (int i = 0; i < tok_count; ++i)
@@ -128,7 +139,7 @@ FString FLlamaRunner::RunInference(const FString& Prompt)
         }
     }
 
-    // --- Sampling setup ---
+    // ---- 4) Sampling config ----
     const int n_vocab = llama_vocab_n_tokens(Vocab);
     std::vector<float> work_logits((size_t)n_vocab);
     std::vector<int> idx((size_t)n_vocab);
@@ -187,27 +198,30 @@ FString FLlamaRunner::RunInference(const FString& Prompt)
         return choice;
         };
 
-    // --- JSON done detector ---
-    auto json_done = [&](const std::string& s) -> bool {
-        int depth = 0;
-        bool in_q = false, escp = false;
-        for (unsigned char ch : s)
+    // ---- 5) Helper to extract first balanced JSON ----
+    auto ExtractFirstJSONObject = [](const std::string& s) -> std::string {
+        size_t start = s.find('{');
+        if (start == std::string::npos) return {};
+        int depth = 0; bool in_q = false, esc = false;
+        for (size_t i = start; i < s.size(); ++i)
         {
-            if (escp) { escp = false; continue; }
-            if (ch == '\\') { escp = true; continue; }
+            unsigned char ch = (unsigned char)s[i];
+            if (esc) { esc = false; continue; }
+            if (ch == '\\') { esc = true; continue; }
             if (ch == '"') { in_q = !in_q; continue; }
             if (in_q) continue;
-            if (ch == '{') ++depth;
+            if (ch == '{') depth++;
             else if (ch == '}')
             {
-                if (depth > 0) --depth;
-                if (depth == 0) return true;
+                depth--;
+                if (depth == 0)
+                    return s.substr(start, i - start + 1);
             }
         }
-        return false;
+        return {};
         };
 
-    // --- Generation loop ---
+    // ---- 6) Generation loop ----
     std::vector<llama_token> out_tokens;
     out_tokens.reserve(512);
 
@@ -216,31 +230,43 @@ FString FLlamaRunner::RunInference(const FString& Prompt)
     std::string stream;
     stream.reserve(4096);
 
-    int maxNew = 512;
-    int top_k = 40;
-    float top_p = 0.9f;
-    float temp = 0.7f; // slightly lower for schema stability
+    const int maxNew = 384;
+    const int top_k = 20;
+    const float top_p = 0.9f;
+    const float temp = 0.2f; // lower temperature for structural consistency
+
+#ifdef LLAMA_GRAMMAR_SUPPORT
+    // Optional grammar enforcement (requires llama.cpp built with grammar)
+    std::vector<const char*> rules;
+    rules.push_back(JSON_G); // you can define JSON_G above
+    llama_grammar grammar = llama_grammar_init(rules.data(), (int)rules.size(), "root");
+#endif
 
     for (int i = 0; i < maxNew; ++i)
     {
         const float* logits = llama_get_logits_ith(Context, -1);
         if (!logits) break;
 
+#ifdef LLAMA_GRAMMAR_SUPPORT
+        llama_sample_grammar(Context, &grammar);
+#endif
+
         int id = (temp <= 0.0f && top_k <= 1)
             ? greedy_pick(logits)
             : sample_topk_topp_temp(logits, top_k, top_p, temp);
 
-        if (llama_vocab_is_eog(Vocab, (llama_token)id))
-            break;
+        if (llama_vocab_is_eog(Vocab, (llama_token)id)) break;
 
         char piece[256];
         int pn = llama_token_to_piece(Vocab, (llama_token)id, piece, sizeof(piece), 0, false);
         if (pn > 0) stream.append(piece, piece + pn);
         out_tokens.push_back((llama_token)id);
 
-        if (json_done(stream))
+        std::string maybe = ExtractFirstJSONObject(stream);
+        if (!maybe.empty())
         {
-            UE_LOG(LogLlamaRunner, Display, TEXT("Detected JSON close at token %d"), i);
+            UE_LOG(LogLlamaRunner, Display, TEXT("Detected complete JSON at token %d"), i);
+            stream = maybe;
             break;
         }
 
@@ -255,26 +281,30 @@ FString FLlamaRunner::RunInference(const FString& Prompt)
             FScopeLock Lock(&DecodeMutex);
             if (llama_decode(Context, step) < 0) break;
         }
+
+#ifdef LLAMA_GRAMMAR_SUPPORT
+        llama_grammar_accept_token(Context, &grammar, id);
+#endif
     }
+
+#ifdef LLAMA_GRAMMAR_SUPPORT
+    llama_grammar_free(&grammar);
+#endif
 
     llama_batch_free(step);
     llama_batch_free(prompt_batch);
 
-    // --- Use direct stream output ---
+    // ---- 7) Clean output ----
     std::string out_str = stream;
-    if (out_str.empty() && !out_tokens.empty())
-    {
-        out_str.assign(out_tokens.size() * 8, '\0');
-        int32_t w = llama_detokenize(Vocab, out_tokens.data(), (int32_t)out_tokens.size(),
-            out_str.data(), (int32_t)out_str.size(),
-            true, false);
-        if (w > 0) out_str.resize((size_t)w); else out_str.clear();
-    }
+    std::string json_only = ExtractFirstJSONObject(out_str);
+    if (!json_only.empty())
+        out_str.swap(json_only);
 
     FString Output(UTF8_TO_TCHAR(out_str.c_str()));
     UE_LOG(LogLlamaRunner, Display, TEXT("Inference completed. Output: %s"), *Output);
     return Output;
 }
+
 
 
 
