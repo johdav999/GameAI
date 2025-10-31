@@ -1,6 +1,10 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include <random>
+#include <numeric>
+#include <cmath>
+#include <cfloat>
 
 struct llama_model;
 struct llama_context;
@@ -18,7 +22,7 @@ public:
 
     /** Executes a synchronous inference call using the provided prompt. */
     FString RunInference(const FString& Prompt);
-
+    mutable FCriticalSection DecodeMutex;
 private:
     void Release();
 

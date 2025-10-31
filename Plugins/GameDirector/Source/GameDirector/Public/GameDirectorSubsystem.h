@@ -25,6 +25,8 @@ public:
     UFUNCTION(BlueprintCallable, Category = "GameDirector|AI")
     FString QueryModel(const FString& InputJSON);
 
+
+
 private:
     /** Attempts to find a GGUF model under Content/AIModels. */
     FString ResolveModelPath() const;

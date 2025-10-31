@@ -11,6 +11,7 @@ Saved/
 *.suo
 *.opensdf
 *.sdf
+*.gguf
 
 # Ignore user-specific config
 *.user
