@@ -56,6 +56,8 @@ void UGameDirectorService::OnPostWorldInit(UWorld* World, const UWorld::Initiali
 
 void UGameDirectorService::Deinitialize()
 {
+    FWorldDelegates::OnPostWorldInitialization.RemoveAll(this);
+
     CachedDirector.Reset();
     TimeSinceLastEval = 0.0f;
     Super::Deinitialize();
@@ -157,7 +159,7 @@ void UGameDirectorService::EvaluateDifficulty()
     {
         GEngine->AddOnScreenDebugMessage(
             (uint64)this, 2.0f, Director ? FColor::Green : FColor::Red,
-            Director ? TEXT("✅ Difficulty update triggered") : TEXT("⚠️ Subsystem unavailable"));
+            Director ? TEXT("✅ Difficulty request queued") : TEXT("⚠️ Subsystem unavailable"));
     }
 }
 
@@ -221,18 +223,23 @@ FString UGameDirectorService::BuildScenarioJSON() const
 
 void UGameDirectorService::RefreshCachedDirector()
 {
-    UGameDirectorSubsystem* Director = nullptr;
+    CachedDirector.Reset();
 
     if (UWorld* World = GetWorldSafe())
     {
         if (UGameInstance* GameInstance = World->GetGameInstance())
         {
-            Director = GameInstance->GetSubsystem<UGameDirectorSubsystem>();
-
-            if (Director)
+            if (UGameDirectorSubsystem* Director = GameInstance->GetSubsystem<UGameDirectorSubsystem>())
             {
+                CachedDirector = Director;
                 UE_LOG(LogGameDirectorService, Log,
                     TEXT("[GameDirectorService] (Re)connected to GameDirectorSubsystem in world %s"),
+                    *World->GetName());
+            }
+            else
+            {
+                UE_LOG(LogGameDirectorService, Verbose,
+                    TEXT("[GameDirectorService] GameDirectorSubsystem not yet available in world %s"),
                     *World->GetName());
             }
         }
@@ -242,14 +249,6 @@ void UGameDirectorService::RefreshCachedDirector()
                 TEXT("[GameDirectorService] GameInstance still null for world %s"), *World->GetName());
         }
     }
-
-    CachedDirector = Director;
-    UE_LOG(LogGameDirectorService, Warning,
-        TEXT("[GameDirectorService] CachedDirector is set (Time=%.2f). World=%s GameInstance=%s"),
-        TimeSinceLastEval,
-        *GetNameSafe(GetWorld()),
-        *GetNameSafe(GetWorld() ? GetWorld()->GetGameInstance() : nullptr)
-    );
 }
 
 UWorld* UGameDirectorService::GetWorldSafe() const

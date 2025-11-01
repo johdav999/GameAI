@@ -39,10 +39,10 @@ public:
 
     // --- Settings ---
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GameDirector")
-    float EvaluationInterval = 10.0f;
+    bool bEnableAutoEvaluation = true;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GameDirector")
-    bool bEnableAutoEvaluation = true;
+    float EvaluationInterval = 10.0f;
 
     // --- Delegate ---
     UPROPERTY(BlueprintAssignable, Category = "GameDirector")
