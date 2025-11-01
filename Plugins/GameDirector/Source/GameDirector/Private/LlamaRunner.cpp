@@ -2,7 +2,7 @@
 
 #include "Misc/Paths.h"
 
-#include <llama.h>
+
 #include <algorithm>
 #include <cstring>
 #include <string>
@@ -43,7 +43,7 @@ bool FLlamaRunner::LoadModel(const FString& ModelPath)
         return false;
     }
 
-    llama_context_params ContextParams = llama_context_default_params();
+   ContextParams = llama_context_default_params();
     Context = llama_new_context_with_model(Model, ContextParams);
 
     if (!Context)
@@ -128,7 +128,13 @@ FString FLlamaRunner::RunInference(const FString& Prompt)
         prompt_batch.seq_id[i][0] = 0;
         prompt_batch.logits[i] = (i == tok_count - 1);
     }
-
+#if defined(LLAMA_API_VERSION) && LLAMA_API_VERSION >= 120
+    llama_kv_cache_clear(Context);
+#else
+    // fallback: recreate context if clearing isn't available
+    llama_free(Context);
+    Context = llama_new_context_with_model(Model, ContextParams);
+#endif
     {
         FScopeLock Lock(&DecodeMutex);
         if (llama_decode(Context, prompt_batch) < 0)

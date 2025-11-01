@@ -1,4 +1,4 @@
-// Copyright Epic Games, Inc. All Rights Reserved.
+﻿// Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "GameDirectorService.h"
 
@@ -17,10 +17,41 @@ DEFINE_LOG_CATEGORY(LogGameDirectorService);
 void UGameDirectorService::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
+
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        UE_LOG(LogGameDirectorService, Verbose,
+            TEXT("[GameDirectorService] Skipping initialization (no world)."));
+        return;
+    }
+
+    // Skip editor / preview / transient worlds
+    if (!World->IsGameWorld() || World->WorldType != EWorldType::Game && World->WorldType != EWorldType::PIE)
+    {
+        UE_LOG(LogGameDirectorService, Verbose,
+            TEXT("[GameDirectorService] Skipping non-game world: %s (Type=%d)"),
+            *World->GetName(), static_cast<int32>(World->WorldType));
+        return;
+    }
+
+    FWorldDelegates::OnPostWorldInitialization.AddUObject(this,
+        &UGameDirectorService::OnPostWorldInit);
+
+    UE_LOG(LogGameDirectorService, Log,
+        TEXT("[GameDirectorService] Initialized for game world: %s"), *World->GetName());
+
     RefreshCachedDirector();
     TimeSinceLastEval = 0.0f;
 }
-
+void UGameDirectorService::OnPostWorldInit(UWorld* World, const UWorld::InitializationValues IVS)
+{
+    if (World && World->IsGameWorld())
+    {
+        RefreshCachedDirector();
+        UE_LOG(LogGameDirectorService, Log, TEXT("[GameDirectorService] Connected after world init: %s"), *World->GetName());
+    }
+}
 void UGameDirectorService::Deinitialize()
 {
     CachedDirector.Reset();
@@ -46,33 +77,75 @@ void UGameDirectorService::Tick(float DeltaSeconds)
 
 void UGameDirectorService::EvaluateDifficulty()
 {
+    //--- World validation -----------------------------------------------------
+    UWorld* World = GetWorld();
+    if (!World || !World->IsGameWorld())
+    {
+        UE_LOG(LogGameDirectorService, Verbose,
+            TEXT("[GameDirectorService] Skipping EvaluateDifficulty for non-game world: %s"),
+            *GetNameSafe(World));
+        return;
+    }
+
+    //--- Skip if auto-eval disabled -------------------------------------------
+    if (!bEnableAutoEvaluation)
+    {
+        UE_LOG(LogGameDirectorService, Verbose,
+            TEXT("[GameDirectorService] Auto-evaluation disabled, skipping difficulty check."));
+        return;
+    }
+
+    //--- Timer reset ----------------------------------------------------------
     TimeSinceLastEval = 0.0f;
 
+    //--- Ensure subsystem pointer is valid ------------------------------------
     if (!CachedDirector.IsValid())
     {
+        UE_LOG(LogGameDirectorService, Warning,
+            TEXT("[GameDirectorService] CachedDirector invalid. World=%s GameInstance=%s"),
+            *GetNameSafe(World),
+            *GetNameSafe(World ? World->GetGameInstance() : nullptr));
+
         RefreshCachedDirector();
     }
 
-    const FString Scenario = BuildScenarioJSON();
+    UGameDirectorSubsystem* Director = CachedDirector.Get();
+    if (!Director)
+    {
+        // Try one last time in case world changed since last eval
+        RefreshCachedDirector();
+        Director = CachedDirector.Get();
+    }
 
+    //--- Build input JSON -----------------------------------------------------
+    const FString Scenario = BuildScenarioJSON();
     UE_LOG(LogGameDirectorService, Log, TEXT("[GameDirectorService] Scenario: %s"), *Scenario);
 
-    if (UGameDirectorSubsystem* Director = CachedDirector.Get())
+    //--- Perform difficulty evaluation ----------------------------------------
+    if (Director)
     {
         Director->RequestDifficultyUpdate(Scenario);
+        UE_LOG(LogGameDirectorService, Log, TEXT("[GameDirectorService] Sent difficulty request to %s"),
+            *Director->GetName());
     }
     else
     {
-        UE_LOG(LogGameDirectorService, Warning, TEXT("[GameDirectorService] GameDirectorSubsystem not available."));
+        UE_LOG(LogGameDirectorService, Warning, TEXT("[GameDirectorService] GameDirectorSubsystem unavailable."));
     }
 
+    //--- Visual feedback in PIE ----------------------------------------------
     if (GEngine)
     {
-        GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Green, TEXT("GameDirectorService triggered difficulty update"));
+        GEngine->AddOnScreenDebugMessage(
+            (uint64)this, 2.0f, Director ? FColor::Green : FColor::Red,
+            Director ? TEXT("✅ Difficulty update triggered") : TEXT("⚠️ Subsystem unavailable"));
     }
 
+    //--- Notify listeners -----------------------------------------------------
     OnDirectorEvaluated.Broadcast(Scenario);
 }
+
+
 
 FString UGameDirectorService::BuildScenarioJSON() const
 {
@@ -136,13 +209,48 @@ void UGameDirectorService::RefreshCachedDirector()
 {
     UGameDirectorSubsystem* Director = nullptr;
 
-    if (const UWorld* World = GetWorld())
+    if (UWorld* World = GetWorldSafe())
     {
         if (UGameInstance* GameInstance = World->GetGameInstance())
         {
             Director = GameInstance->GetSubsystem<UGameDirectorSubsystem>();
+
+            if (Director)
+            {
+                UE_LOG(LogGameDirectorService, Log,
+                    TEXT("[GameDirectorService] (Re)connected to GameDirectorSubsystem in world %s"),
+                    *World->GetName());
+            }
+        }
+        else
+        {
+            UE_LOG(LogGameDirectorService, Verbose,
+                TEXT("[GameDirectorService] GameInstance still null for world %s"), *World->GetName());
         }
     }
 
     CachedDirector = Director;
+    UE_LOG(LogGameDirectorService, Warning,
+        TEXT("[GameDirectorService] CachedDirector is set (Time=%.2f). World=%s GameInstance=%s"),
+        TimeSinceLastEval,
+        *GetNameSafe(GetWorld()),
+        *GetNameSafe(GetWorld() ? GetWorld()->GetGameInstance() : nullptr)
+    );
+}
+UWorld* UGameDirectorService::GetWorldSafe() const
+{
+    if (const UWorld* SubsystemWorld = GetWorld())
+    {
+        return const_cast<UWorld*>(SubsystemWorld);
+    }
+
+    if (UObject* Outer = GetOuter())
+    {
+        if (UWorld* OuterWorld = Cast<UWorld>(Outer))
+        {
+            return OuterWorld;
+        }
+    }
+
+    return nullptr;
 }

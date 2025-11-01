@@ -5,6 +5,7 @@
 #include <numeric>
 #include <cmath>
 #include <cfloat>
+#include <llama.h>
 
 struct llama_model;
 struct llama_context;
@@ -16,7 +17,7 @@ class GAMEDIRECTOR_API FLlamaRunner
 public:
     FLlamaRunner();
     ~FLlamaRunner();
-
+    llama_context_params ContextParams;
     /** Loads a GGUF model located on disk. */
     bool LoadModel(const FString& ModelPath);
 
