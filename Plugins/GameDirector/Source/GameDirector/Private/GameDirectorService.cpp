@@ -1,4 +1,4 @@
-﻿// Copyright Epic Games, Inc. All Rights Reserved.
+// Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "GameDirectorService.h"
 
@@ -44,6 +44,7 @@ void UGameDirectorService::Initialize(FSubsystemCollectionBase& Collection)
     RefreshCachedDirector();
     TimeSinceLastEval = 0.0f;
 }
+
 void UGameDirectorService::OnPostWorldInit(UWorld* World, const UWorld::InitializationValues IVS)
 {
     if (World && World->IsGameWorld())
@@ -52,6 +53,7 @@ void UGameDirectorService::OnPostWorldInit(UWorld* World, const UWorld::Initiali
         UE_LOG(LogGameDirectorService, Log, TEXT("[GameDirectorService] Connected after world init: %s"), *World->GetName());
     }
 }
+
 void UGameDirectorService::Deinitialize()
 {
     CachedDirector.Reset();
@@ -124,7 +126,24 @@ void UGameDirectorService::EvaluateDifficulty()
     //--- Perform difficulty evaluation ----------------------------------------
     if (Director)
     {
-        Director->RequestDifficultyUpdate(Scenario);
+        const TWeakObjectPtr<UGameDirectorService> WeakThis(this);
+
+        Director->RequestInference(TEXT("Difficulty"), Scenario,
+            [WeakThis](const FString& ResultJSON)
+            {
+                if (!WeakThis.IsValid())
+                {
+                    return;
+                }
+
+                if (UGameDirectorService* StrongService = WeakThis.Get())
+                {
+                    StrongService->OnDirectorEvaluated.Broadcast(ResultJSON);
+                    UE_LOG(LogGameDirectorService, Log,
+                        TEXT("[GameDirectorService] Inference completed: %s"), *ResultJSON);
+                }
+            });
+
         UE_LOG(LogGameDirectorService, Log, TEXT("[GameDirectorService] Sent difficulty request to %s"),
             *Director->GetName());
     }
@@ -140,12 +159,7 @@ void UGameDirectorService::EvaluateDifficulty()
             (uint64)this, 2.0f, Director ? FColor::Green : FColor::Red,
             Director ? TEXT("✅ Difficulty update triggered") : TEXT("⚠️ Subsystem unavailable"));
     }
-
-    //--- Notify listeners -----------------------------------------------------
-    OnDirectorEvaluated.Broadcast(Scenario);
 }
-
-
 
 FString UGameDirectorService::BuildScenarioJSON() const
 {
@@ -237,6 +251,7 @@ void UGameDirectorService::RefreshCachedDirector()
         *GetNameSafe(GetWorld() ? GetWorld()->GetGameInstance() : nullptr)
     );
 }
+
 UWorld* UGameDirectorService::GetWorldSafe() const
 {
     if (const UWorld* SubsystemWorld = GetWorld())
