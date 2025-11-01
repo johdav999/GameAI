@@ -1,8 +1,11 @@
 #include "GameDirectorSubsystem.h"
 
+#include "GameDirectorJob.h"
+#include "GameDirectorJobQueue.h"
 #include "GameDirectorTypes.h"
 #include "LlamaRunner.h"
 
+#include "Containers/Ticker.h"
 #include "Dom/JsonObject.h"
 #include "Engine/World.h"
 #include "HAL/FileManager.h"
@@ -10,7 +13,6 @@
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
 #include "Policies/CondensedJsonPrintPolicy.h"
-
 
 #include "TimerManager.h"
 
@@ -48,6 +50,14 @@ void UGameDirectorSubsystem::Initialize(FSubsystemCollectionBase& Collection)
         return;
     }
 
+    UE_LOG(LogGameDirector, Log, TEXT("Loaded llama model from %s"), *ModelPath);
+
+    JobQueue = MakeShared<FGameDirectorJobQueue>(LlamaRunner, MaxConcurrentJobs);
+    if (!JobQueueTickerHandle.IsValid())
+    {
+        JobQueueTickerHandle = FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateUObject(this, &UGameDirectorSubsystem::PumpJobQueue));
+    }
+
     OnDifficultyChanged.Broadcast(CurrentDifficulty);
 }
 
@@ -58,28 +68,73 @@ void UGameDirectorSubsystem::Deinitialize()
         World->GetTimerManager().ClearTimer(RestoreTimerHandle);
     }
 
+    if (JobQueueTickerHandle.IsValid())
+    {
+        FTSTicker::GetCoreTicker().RemoveTicker(JobQueueTickerHandle);
+        JobQueueTickerHandle.Reset();
+    }
+
+    JobQueue.Reset();
     LlamaRunner.Reset();
+
     Super::Deinitialize();
+}
+
+void UGameDirectorSubsystem::RequestInference(FName ComponentId, const FString& ScenarioJSON, TFunction<void(const FString&)> OnResult)
+{
+    if (!LlamaRunner.IsValid())
+    {
+        UE_LOG(LogGameDirector, Warning, TEXT("RequestInference called but no llama model is loaded."));
+        if (OnResult)
+        {
+            OnResult(FString());
+        }
+        return;
+    }
+
+    if (!JobQueue.IsValid())
+    {
+        JobQueue = MakeShared<FGameDirectorJobQueue>(LlamaRunner, MaxConcurrentJobs);
+    }
+
+    const TSharedPtr<FGameDirectorJob> Job = MakeShared<FGameDirectorJob>(ComponentId, ScenarioJSON, FGameDirectorJob::EPriority::Normal);
+    Job->OnComplete = MoveTemp(OnResult);
+
+    UE_LOG(LogGameDirector, Log, TEXT("[GameDirectorSubsystem] Queuing inference job for %s."), *ComponentId.ToString());
+
+    JobQueue->EnqueueJob(Job);
 }
 
 void UGameDirectorSubsystem::RequestDifficultyUpdate(const FString& Scenario)
 {
-    if (!LlamaRunner.IsValid())
+    const TWeakObjectPtr<UGameDirectorSubsystem> WeakThis(this);
+
+    RequestInference(TEXT("Difficulty"), Scenario, [WeakThis](const FString& ResultJSON)
     {
-        UE_LOG(LogGameDirector, Warning, TEXT("RequestDifficultyUpdate called but no llama model is loaded."));
-        return;
-    }
+        if (!WeakThis.IsValid())
+        {
+            return;
+        }
 
-    UE_LOG(LogGameDirector, Log, TEXT("Requesting difficulty update. Scenario: %s"), *Scenario);
+        UGameDirectorSubsystem* StrongSubsystem = WeakThis.Get();
+        if (!StrongSubsystem)
+        {
+            return;
+        }
 
-    const FString Response = LlamaRunner->RunInference(Scenario);
-    if (Response.IsEmpty())
-    {
-        UE_LOG(LogGameDirector, Warning, TEXT("Model response was empty."));
-        return;
-    }
+        if (ResultJSON.IsEmpty())
+        {
+            UE_LOG(LogGameDirector, Warning, TEXT("Difficulty inference returned an empty response."));
+            return;
+        }
 
-    HandleModelResponse(Response);
+        StrongSubsystem->HandleModelResponse(ResultJSON);
+    });
+}
+
+bool UGameDirectorSubsystem::IsBusy() const
+{
+    return JobQueue.IsValid() && JobQueue->IsBusy();
 }
 
 void UGameDirectorSubsystem::HandleModelResponse(const FString& Response)
@@ -166,8 +221,6 @@ bool UGameDirectorSubsystem::TryParseDifficulty(const TSharedPtr<FJsonObject>& R
             continue;
         }
 
-
-
         double NumberValue = 0.0;
 
         if (ArgsObject->TryGetNumberField(TEXT("aim_spread_level"), NumberValue))
@@ -233,3 +286,12 @@ FString UGameDirectorSubsystem::ResolveModelPath() const
     return FPaths::Combine(ModelsDirectory, FoundModels[0]);
 }
 
+bool UGameDirectorSubsystem::PumpJobQueue(float DeltaTime)
+{
+    if (JobQueue.IsValid())
+    {
+        JobQueue->Tick();
+    }
+
+    return true;
+}

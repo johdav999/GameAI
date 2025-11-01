@@ -8,7 +8,7 @@
 class UGameDirectorSubsystem;
 
 DECLARE_LOG_CATEGORY_EXTERN(LogGameDirectorService, Log, All);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnDirectorEvaluated, const FString&, ScenarioJSON);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnDirectorEvaluated, const FString&, ResultJSON);
 
 UCLASS()
 class GAMEDIRECTOR_API UGameDirectorService : public UWorldSubsystem, public FTickableGameObject
