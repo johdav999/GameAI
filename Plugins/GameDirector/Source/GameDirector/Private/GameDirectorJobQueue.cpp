@@ -40,13 +40,10 @@ void FGameDirectorJobQueue::Tick()
     TryStartJobs();
 
     TArray<TSharedPtr<FGameDirectorJob>> JobsToDispatch;
+    TSharedPtr<FGameDirectorJob> Job;
+    while (CompletedJobs.Dequeue(Job))
     {
-        FScopeLock ScopeLock(&CompletedMutex);
-        TSharedPtr<FGameDirectorJob> Job;
-        while (CompletedJobs.Dequeue(Job))
-        {
-            JobsToDispatch.Add(Job);
-        }
+        JobsToDispatch.Add(Job);
     }
 
     for (const TSharedPtr<FGameDirectorJob>& Job : JobsToDispatch)
@@ -157,8 +154,5 @@ void FGameDirectorJobQueue::CompleteJob(const TSharedPtr<FGameDirectorJob>& Job)
         ActiveJobCount = FMath::Max(0, ActiveJobCount - 1);
     }
 
-    {
-        FScopeLock ScopeLock(&CompletedMutex);
-        CompletedJobs.Enqueue(Job);
-    }
+    CompletedJobs.Enqueue(Job);
 }

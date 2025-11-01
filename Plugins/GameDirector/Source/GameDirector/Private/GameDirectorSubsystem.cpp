@@ -85,16 +85,18 @@ void UGameDirectorSubsystem::RequestInference(FName ComponentId, const FString& 
     if (!LlamaRunner.IsValid())
     {
         UE_LOG(LogGameDirector, Warning, TEXT("RequestInference called but no llama model is loaded."));
-        if (OnResult)
-        {
-            OnResult(FString());
-        }
         return;
     }
 
     if (!JobQueue.IsValid())
     {
         JobQueue = MakeShared<FGameDirectorJobQueue>(LlamaRunner, MaxConcurrentJobs);
+
+        if (!JobQueueTickerHandle.IsValid())
+        {
+            JobQueueTickerHandle = FTSTicker::GetCoreTicker().AddTicker(
+                FTickerDelegate::CreateUObject(this, &UGameDirectorSubsystem::PumpJobQueue));
+        }
     }
 
     const TSharedPtr<FGameDirectorJob> Job = MakeShared<FGameDirectorJob>(ComponentId, ScenarioJSON, FGameDirectorJob::EPriority::Normal);

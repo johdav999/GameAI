@@ -35,8 +35,7 @@ private:
     mutable FCriticalSection PendingMutex;
     TArray<TSharedPtr<FGameDirectorJob>> PendingJobs;
 
-    mutable FCriticalSection CompletedMutex;
-    TQueue<TSharedPtr<FGameDirectorJob>> CompletedJobs;
+    TQueue<TSharedPtr<FGameDirectorJob>, EQueueMode::Mpsc> CompletedJobs;
 
     mutable FCriticalSection ActiveMutex;
     int32 ActiveJobCount = 0;
